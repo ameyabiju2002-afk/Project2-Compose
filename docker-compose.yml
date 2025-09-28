@@ -1,0 +1,44 @@
+version: "3.9" # Using docker compose version 3.
+
+services:
+  dind: This service rund Docker-in docker which means a full docker engine inside a container
+    image: docker:dind #Official Docker DinD image is used here
+    container_name: dind
+    privileged: true #Privilaged mode is required so DinD can run Docker daemon safely
+    environment:
+      - DOCKER_TLS_CERTDIR=/certs #enable TLS for secure docker communication
+    volumes:
+      - docker-certs-ca:/certs/ca #A volume to persist the Certification Authority files for Docker 
+      - docker-certs-client:/certs/client #A volume to persist the client certifications that Jenkins will use
+      - jenkins-data:/var/jenkins_home #A shared volume so Jenkins data is always available 
+    networks:
+      - jenkins #Both DinD and Jenkins aremplaced on the same custom network to communicate easily
+
+  jenkins: #this service runs Jenkins, CI/CD automation server
+    image: jenkins/jenkins:lts-jdk11 #Used the long term support Jenkins image with Java 11 installed
+    container_name: jenkins 
+    restart: unless-stopped 
+    user: root #run as root so Jenkins has permission to use Docker commands inside the container
+    environment:
+      - DOCKER_HOST=tcp://docker:2376 #Jenkins connect to DinD service using this address
+      - DOCKER_CERT_PATH=/certs/client #Path inside Jenkins to the Docker client certifications
+      - DOCKER_TLS_VERIFY=1 #enforce that all docker connections from Jenkins are secured with TLS
+    ports:
+      - "8080:8080" #Maps Jenkins web UI to port 8080 on the VM 
+      - "50000:50000" #Maps the agent port 
+    volumes:
+      - docker-certs-client:/certs/client:ro # Mounts Docker client certs as read-only so Jenkins can authenticate
+      - jenkins-data:/var/jenkins_home #Mounts Jenkins home so jobs, plugins, and configurations persists accross restarts. 
+      - /usr/bin/docker:/usr/bin/docker
+    networks:
+      - jenkins # Ensures Jenkins and DinD can talk to each other over the same virtual network
+
+volumes: # named volumes help perserve data even if the containers are stopped or deleted
+  docker-certs-ca:/certs/ca # Stores CA certificate fpr docker TLS communication
+  docker-certs-client:/certs/client #Stores the client certifications used by Jenkins to connect to Docker
+  jenkins-data:/var/jenkins_home #Stores JEnkins job history, plugins and settings so they will not be lost 
+  docker-data:/var/lib/docker #persists docker image layers
+
+networks:
+  jenkins: #A dedicated custom network for Jenkins and DinD, so they communicate securely and are isolated from other containers
+
